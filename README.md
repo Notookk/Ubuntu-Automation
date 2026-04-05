@@ -10,13 +10,9 @@
   <img src="https://img.shields.io/badge/UBUNTU-LATEST-E95420?style=for-the-badge&logo=ubuntu&logoColor=white">
   <img src="https://img.shields.io/badge/NGROK-TUNNEL-000000?style=for-the-badge&logo=ngrok&logoColor=white">
   <img src="https://img.shields.io/badge/RAILWAY-DEPLOY-7B42BC?style=for-the-badge&logo=railway&logoColor=white">
+  <img src="https://img.shields.io/github/stars/Notookk?style=social">
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/github/stars/Notookk?style=social">
-  <img src="https://img.shields.io/github/forks/Notookk?style=social">
-  <img src="https://img.shields.io/github/watchers/Notookk?style=social">
-</p>
 
 ---
 
