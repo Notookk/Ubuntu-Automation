@@ -14,6 +14,7 @@ RUN wget -O ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux
     chmod +x ngrok
 
 RUN mkdir -p /run/sshd && \
+    chmod 755 /run/sshd && \
     echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
     echo 'root:morning' | chpasswd && \
@@ -22,9 +23,10 @@ RUN mkdir -p /run/sshd && \
 RUN echo "#!/bin/bash" > /morning.sh && \
     echo "./ngrok config add-authtoken ${NGROK_TOKEN}" >> /morning.sh && \
     echo "./ngrok tcp 22 &" >> /morning.sh && \
-    echo "/usr/sbin/sshd -D" >> /morning.sh && \
+    echo "sleep 5" >> /morning.sh && \
+    echo "/usr/sbin/sshd -D -e" >> /morning.sh && \
     chmod 755 /morning.sh
 
 EXPOSE 22 80 443 3306 8080 8888
 
-CMD ["/morning.sh"]
+CMD ["/bin/bash", "/morning.sh"]
