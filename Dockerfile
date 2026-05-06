@@ -1,16 +1,23 @@
-FROM ubuntu:latest
+FROM ubuntu:22.04
 
 RUN apt update -y > /dev/null 2>&1 && \
     apt upgrade -y > /dev/null 2>&1 && \
-    apt install locales ssh wget unzip -y > /dev/null 2>&1 && \
-    localedef -i en_US -c -f UTF-8 en_US.UTF-8
+    apt install locales ssh wget unzip bash -y > /dev/null 2>&1 && \
+    localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
 
 ENV LANG=en_US.utf8
 ARG NGROK_TOKEN
 ENV NGROK_TOKEN=${NGROK_TOKEN}
 
 RUN wget -O ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip > /dev/null 2>&1 && \
-    unzip ngrok.zip
+    unzip ngrok.zip && \
+    chmod +x ngrok
+
+RUN mkdir -p /run/sshd && \
+    echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
+    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
+    echo 'root:morning' | chpasswd && \
+    chsh -s /bin/bash root
 
 RUN echo "#!/bin/bash" > /morning.sh && \
     echo "./ngrok config add-authtoken ${NGROK_TOKEN}" >> /morning.sh && \
@@ -18,11 +25,6 @@ RUN echo "#!/bin/bash" > /morning.sh && \
     echo "/usr/sbin/sshd -D" >> /morning.sh && \
     chmod 755 /morning.sh
 
-RUN mkdir -p /run/sshd && \
-    echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
-    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
-    echo 'root:morning' | chpasswd
-
-EXPOSE 22 80 8888 8080 443
+EXPOSE 22 80 443 3306 8080 8888
 
 CMD ["/morning.sh"]
