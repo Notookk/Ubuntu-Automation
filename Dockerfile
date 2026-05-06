@@ -15,6 +15,11 @@ RUN wget -O ngrok.zip https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux
 
 RUN mkdir -p /run/sshd && \
     chmod 755 /run/sshd && \
+    ssh-keygen -A
+
+# Fix: Disable PAM audit and setup login environment
+RUN sed -i 's/use_pam yes/use_pam no/g' /etc/ssh/sshd_config && \
+    sed -i 's/^session\s\+required\s\+pam_loginuid.so$/session optional pam_loginuid.so/' /etc/pam.d/sshd && \
     echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
     echo 'root:morning' | chpasswd && \
@@ -27,6 +32,6 @@ RUN echo "#!/bin/bash" > /morning.sh && \
     echo "/usr/sbin/sshd -D -e" >> /morning.sh && \
     chmod 755 /morning.sh
 
-EXPOSE 22 80 443 3306 8080 8888
+EXPOSE 22 80 443
 
 CMD ["/bin/bash", "/morning.sh"]
