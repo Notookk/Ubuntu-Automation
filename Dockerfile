@@ -4,7 +4,7 @@
 FROM ubuntu:22.04
 
 # ------------------------------------------------------------------
-#  Core packages (locale, openssh, wget, curl, unzip, ca‑certificates, tzdata)
+#  Core packages (locale, openssh, curl, wget, unzip, ca‑certs, tzdata)
 # ------------------------------------------------------------------
 RUN apt-get update -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -29,7 +29,7 @@ ENV LC_ALL=en_US.UTF-8
 # --------------------------------------------------------------
 #  Install ngrok (latest v3 stable)
 # --------------------------------------------------------------
-# Generic stable URL (always points to newest ngrok v3)
+# Generic stable URL – always points to newest ngrok v3
 ENV NGROK_URL=https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
 
 RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
@@ -41,75 +41,76 @@ RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
 #  SSH configuration – allow root login with password
 # --------------------------------------------------------------
 RUN mkdir -p /var/run/sshd && \
-    # Disable PAM (simpler on Ubuntu 22.04)
     sed -i 's/^#\?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config && \
     echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
-    # Generate host keys
     ssh-keygen -A
 
 # ------------------------------------------------------------------
-#  Runtime environment variables (set via Railway “Variables” UI)
+#  Runtime environment variables (set via Railway "Variables" UI)
 # ------------------------------------------------------------------
-ENV NGROK_TOKEN=''          # Must be set in Railway UI
-ENV ROOT_PASSWORD='morning' # Change this in production
+ENV NGROK_TOKEN=''
+ENV ROOT_PASSWORD='morning'
 
 # ------------------------------------------------------------------
-#  Create entrypoint script
+#  Create entrypoint script using a heredoc (no escaping nightmares)
 # ------------------------------------------------------------------
-RUN echo '#!/usr/bin/env bash' > /usr/local/bin/entrypoint.sh && \
-    echo 'set -euo pipefail' >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# ------------------------------------------------------------' >> /usr/local/bin/entrypoint.sh && \
-    echo '# 1️⃣  Set root password' >> /usr/local/bin/entrypoint.sh && \
-    echo '# ------------------------------------------------------------' >> /usr/local/bin/entrypoint.sh && \
-    echo 'if [[ -n "${ROOT_PASSWORD:-}" ]]; then' >> /usr/local/bin/entrypoint.sh && \
-    echo '    echo "root:${ROOT_PASSWORD}" | chpasswd' >> /usr/local/bin/entrypoint.sh && \
-    echo '    if [[ "${ROOT_PASSWORD}" == "morning" ]]; then' >> /usr/local/bin/entrypoint.sh && \
-    echo '        echo "⚠️  Using default root password (morning) – please change it!"' >> /usr/local/bin/entrypoint.sh && \
-    echo '    fi' >> /usr/local/bin/entrypoint.sh && \
-    echo 'fi' >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# ------------------------------------------------------------' >> /usr/local/bin/entrypoint.sh && \
-    echo '# 2️⃣  Configure ngrok' >> /usr/local/bin/entrypoint.sh && \
-    echo '# ------------------------------------------------------------' >> /usr/local/bin/entrypoint.sh && \
-    echo 'if [[ -z "${NGROK_TOKEN:-}" ]]; then' >> /usr/local/bin/entrypoint.sh && \
-    echo '    echo "❌ NGROK_TOKEN env var not set – aborting."' >> /usr/local/bin/entrypoint.sh && \
-    echo '    exit 1' >> /usr/local/bin/entrypoint.sh && \
-    echo 'fi' >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo 'ngrok config add-authtoken "${NGROK_TOKEN}" >/dev/null' >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# ------------------------------------------------------------' >> /usr/local/bin/entrypoint.sh && \
-    echo '# 3️⃣  Start ngrok (TCP on port 22) and wait for public URL' >> /usr/local/bin/entrypoint.sh && \
-    echo '# ------------------------------------------------------------' >> /usr/local/bin/entrypoint.sh && \
-    echo 'ngrok tcp 22 --log=stdout &' >> /usr/local/bin/entrypoint.sh && \
-    echo 'NGROK_PID=$!' >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# Wait for ngrok API to become available' >> /usr/local/bin/entrypoint.sh && \
-    echo 'for i in {1..10}; do' >> /usr/local/bin/entrypoint.sh && \
-    echo '    if curl -s http://localhost:4040/api/tunnels > /dev/null 2>&1; then' >> /usr/local/bin/entrypoint.sh && \
-    echo '        break' >> /usr/local/bin/entrypoint.sh && \
-    echo '    fi' >> /usr/local/bin/entrypoint.sh && \
-    echo '    sleep 1' >> /usr/local/bin/entrypoint.sh && \
-    echo 'done' >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# Extract public TCP URL from ngrok API' >> /usr/local/bin/entrypoint.sh && \
-    echo 'TUNNEL_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"'"'tcp://[^"]*'"'"' | head -1)' >> /usr/local/bin/entrypoint.sh && \
-    echo 'if [[ -z "$TUNNEL_URL" ]]; then' >> /usr/local/bin/entrypoint.sh && \
-    echo '    echo "❌ Failed to obtain ngrok tunnel URL"' >> /usr/local/bin/entrypoint.sh && \
-    echo '    exit 1' >> /usr/local/bin/entrypoint.sh && \
-    echo 'fi' >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo 'echo "===== ngrok tunnel ready ====="' >> /usr/local/bin/entrypoint.sh && \
-    echo 'echo "ssh root@${TUNNEL_URL#tcp://}"' >> /usr/local/bin/entrypoint.sh && \
-    echo 'echo "==============================="' >> /usr/local/bin/entrypoint.sh && \
-    echo '' >> /usr/local/bin/entrypoint.sh && \
-    echo '# ------------------------------------------------------------' >> /usr/local/bin/entrypoint.sh && \
-    echo '# 4️⃣  Run SSH daemon in foreground' >> /usr/local/bin/entrypoint.sh && \
-    echo '# ------------------------------------------------------------' >> /usr/local/bin/entrypoint.sh && \
-    echo 'exec /usr/sbin/sshd -D -e' >> /usr/local/bin/entrypoint.sh && \
-    chmod +x /usr/local/bin/entrypoint.sh
+RUN <<'EOF' cat > /usr/local/bin/entrypoint.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ------------------------------------------------------------
+# 1️⃣ Set root password
+# ------------------------------------------------------------
+if [[ -n "${ROOT_PASSWORD:-}" ]]; then
+    echo "root:${ROOT_PASSWORD}" | chpasswd
+    if [[ "${ROOT_PASSWORD}" == "morning" ]]; then
+        echo "⚠️  Using default root password (morning) – please change it!"
+    fi
+fi
+
+# ------------------------------------------------------------
+# 2️⃣ Configure ngrok
+# ------------------------------------------------------------
+if [[ -z "${NGROK_TOKEN:-}" ]]; then
+    echo "❌ NGROK_TOKEN env var not set – aborting."
+    exit 1
+fi
+
+ngrok config add-authtoken "${NGROK_TOKEN}" >/dev/null
+
+# ------------------------------------------------------------
+# 3️⃣ Start ngrok (TCP on port 22) and wait for public URL
+# ------------------------------------------------------------
+ngrok tcp 22 --log=stdout &
+NGROK_PID=$!
+
+# Wait for ngrok API to become available (max 10 seconds)
+for i in {1..10}; do
+    if curl -s http://localhost:4040/api/tunnels > /dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+# Extract public TCP URL from ngrok API
+TUNNEL_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
+if [[ -z "$TUNNEL_URL" ]]; then
+    echo "❌ Failed to obtain ngrok tunnel URL"
+    exit 1
+fi
+
+echo "===== ngrok tunnel ready ====="
+echo "ssh root@${TUNNEL_URL#tcp://}"
+echo "==============================="
+
+# ------------------------------------------------------------
+# 4️⃣ Run SSH daemon in foreground (keeps container alive)
+# ------------------------------------------------------------
+exec /usr/sbin/sshd -D -e
+EOF
+
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # ------------------------------------------------------------------
 #  Ports (SSH + ngrok web UI)
