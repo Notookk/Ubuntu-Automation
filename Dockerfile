@@ -32,7 +32,7 @@ RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
     chmod +x /usr/local/bin/ngrok && \
     rm -f /tmp/ngrok.zip
 
-# SSH configuration (avoid deprecated/invalid options in config file)
+# SSH configuration (no invalid options)
 RUN mkdir -p /var/run/sshd /var/log && \
     sed -i 's/^#\?UsePAM .*/UsePAM yes/' /etc/ssh/sshd_config && \
     echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
@@ -40,9 +40,10 @@ RUN mkdir -p /var/run/sshd /var/log && \
     echo 'PrintLastLog no' >> /etc/ssh/sshd_config && \
     echo 'PrintMotd no' >> /etc/ssh/sshd_config && \
     echo 'LogLevel DEBUG3' >> /etc/ssh/sshd_config && \
+    echo 'UsePrivilegeSeparation no' >> /etc/ssh/sshd_config && \
     ssh-keygen -A
 
-# Create utmp/wtmp/lastlog files
+# Create utmp/wtmp/lastlog files (avoid logout errors)
 RUN touch /var/log/wtmp /var/log/btmp /var/log/lastlog && \
     chown root:utmp /var/log/wtmp /var/log/btmp && \
     chmod 664 /var/log/wtmp /var/log/btmp && \
@@ -64,7 +65,7 @@ EOF
 ENV NGROK_TOKEN=''
 ENV ROOT_PASSWORD='morning'
 
-# Entrypoint script – pass sandbox options directly to sshd command
+# Entrypoint script (no Sandbox option, only UsePrivilegeSeparation)
 RUN <<'EOF' cat > /usr/local/bin/entrypoint.sh
 #!/usr/bin/env bash
 set -euo pipefail
@@ -102,8 +103,9 @@ echo "===== ngrok tunnel ready ====="
 echo "ssh root@${TUNNEL_URL#tcp://}"
 echo "==============================="
 
-# Start SSHd with command-line overrides to avoid audit failures
-exec /usr/sbin/sshd -D -e -o Sandbox=no -o UsePrivilegeSeparation=no
+# Start sshd – privilege separation disabled to avoid audit errors
+# Sandbox option does not exist; UsePrivilegeSeparation=no is sufficient
+exec /usr/sbin/sshd -D -e -o UsePrivilegeSeparation=no
 EOF
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
