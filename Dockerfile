@@ -1,6 +1,3 @@
-# --------------------------------------------------------------
-#  Ubuntu 22.04 – SSH over ngrok using Dropbear (no logout errors)
-# --------------------------------------------------------------
 FROM ubuntu:22.04
 
 RUN apt-get update -y && \
@@ -27,16 +24,16 @@ RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
     chmod +x /usr/local/bin/ngrok && \
     rm -f /tmp/ngrok.zip
 
-# Generate Dropbear host keys (RSA, ECDSA, Ed25519)
+# Generate all host key types (including DSS to silence warning)
 RUN mkdir -p /etc/dropbear && \
     dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key && \
     dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key && \
-    dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key
+    dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key && \
+    dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key 2>/dev/null || true
 
 ENV NGROK_TOKEN=''
 ENV ROOT_PASSWORD='morning'
 
-# Entrypoint script (starts ngrok and dropbear)
 RUN <<'EOF' cat > /usr/local/bin/entrypoint.sh
 #!/usr/bin/env bash
 set -euo pipefail
@@ -74,16 +71,17 @@ echo "===== ngrok tunnel ready ====="
 echo "ssh root@${TUNNEL_URL#tcp://}"
 echo "==============================="
 
-# Start Dropbear: 
-# -p 22         listen on port 22
-# -F            foreground (stay in container)
-# -E            log to stderr
-# -g            allow password logins
-# -r <file>     specify host key (repeat for each key type)
-exec /usr/sbin/dropbear -p 22 -F -E -g \
+# Start Dropbear:
+# -p 22      port
+# -F         foreground
+# -E         log to stderr
+# -s         disable public key auth (force password)
+# -r keys    specify host keys
+exec /usr/sbin/dropbear -p 22 -F -E -s \
     -r /etc/dropbear/dropbear_rsa_host_key \
     -r /etc/dropbear/dropbear_ecdsa_host_key \
-    -r /etc/dropbear/dropbear_ed25519_host_key
+    -r /etc/dropbear/dropbear_ed25519_host_key \
+    -r /etc/dropbear/dropbear_dss_host_key
 EOF
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
