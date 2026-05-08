@@ -1,5 +1,5 @@
 # --------------------------------------------------------------
-#  Ubuntu 22.04 base
+#  Ubuntu 22.04 base – SSH over ngrok for Railway
 # --------------------------------------------------------------
 FROM ubuntu:22.04
 
@@ -25,31 +25,30 @@ RUN locale-gen en_US.UTF-8 && \
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# Install ngrok (latest v3 stable)
+# ngrok latest stable
 ENV NGROK_URL=https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
 RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
     unzip -q /tmp/ngrok.zip -d /usr/local/bin && \
     chmod +x /usr/local/bin/ngrok && \
     rm -f /tmp/ngrok.zip
 
-# SSH configuration (no invalid options)
+# SSH config (no invalid options)
 RUN mkdir -p /var/run/sshd /var/log && \
     sed -i 's/^#\?UsePAM .*/UsePAM yes/' /etc/ssh/sshd_config && \
     echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
     echo 'PrintLastLog no' >> /etc/ssh/sshd_config && \
     echo 'PrintMotd no' >> /etc/ssh/sshd_config && \
-    echo 'LogLevel DEBUG3' >> /etc/ssh/sshd_config && \
     echo 'UsePrivilegeSeparation no' >> /etc/ssh/sshd_config && \
     ssh-keygen -A
 
-# Create utmp/wtmp/lastlog files (avoid logout errors)
+# Fix utmp/wtmp/lastlog
 RUN touch /var/log/wtmp /var/log/btmp /var/log/lastlog && \
     chown root:utmp /var/log/wtmp /var/log/btmp && \
     chmod 664 /var/log/wtmp /var/log/btmp && \
     chmod 644 /var/log/lastlog
 
-# Ensure valid shell and /dev/pts
+# Ensure root shell and /dev/pts
 RUN test -x /bin/bash || (apt-get update && apt-get install -y bash) && \
     sed -i 's|^root:.*|root:x:0:0:root:/root:/bin/bash|' /etc/passwd && \
     mkdir -p /dev/pts && chmod 755 /dev/pts
@@ -65,7 +64,7 @@ EOF
 ENV NGROK_TOKEN=''
 ENV ROOT_PASSWORD='morning'
 
-# Entrypoint script (no Sandbox option, only UsePrivilegeSeparation)
+# Entrypoint – disable privilege separation to avoid audit errors
 RUN <<'EOF' cat > /usr/local/bin/entrypoint.sh
 #!/usr/bin/env bash
 set -euo pipefail
@@ -103,8 +102,6 @@ echo "===== ngrok tunnel ready ====="
 echo "ssh root@${TUNNEL_URL#tcp://}"
 echo "==============================="
 
-# Start sshd – privilege separation disabled to avoid audit errors
-# Sandbox option does not exist; UsePrivilegeSeparation=no is sufficient
 exec /usr/sbin/sshd -D -e -o UsePrivilegeSeparation=no
 EOF
 
