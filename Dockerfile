@@ -1,5 +1,5 @@
 # --------------------------------------------------------------
-#  Ubuntu 22.04 – SSH over ngrok (no PAM, no session logout errors)
+#  Ubuntu 22.04 – SSH over ngrok (no PAM, no privilege separation)
 # --------------------------------------------------------------
 FROM ubuntu:22.04
 
@@ -28,18 +28,21 @@ RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
     chmod +x /usr/local/bin/ngrok && \
     rm -f /tmp/ngrok.zip
 
-# SSH configuration – use internal password auth, no PAM, no privilege separation
-RUN mkdir -p /var/run/sshd /var/log && \
-    sed -i 's/^#\?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config && \
-    echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
-    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
-    echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
-    echo 'PrintLastLog no' >> /etc/ssh/sshd_config && \
-    echo 'PrintMotd no' >> /etc/ssh/sshd_config && \
-    echo 'UsePrivilegeSeparation no' >> /etc/ssh/sshd_config && \
+# Configure SSH – disable everything that can cause issues in containers
+RUN mkdir -p /var/run/sshd && \
+    # Remove any existing configuration that might interfere
+    sed -i 's/^#\?UsePAM.*/UsePAM no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#\?UsePrivilegeSeparation.*/UsePrivilegeSeparation no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+    sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/^#\?ChallengeResponseAuthentication.*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#\?PrintLastLog.*/PrintLastLog no/' /etc/ssh/sshd_config && \
+    sed -i 's/^#\?PrintMotd.*/PrintMotd no/' /etc/ssh/sshd_config && \
+    # Force listening on all interfaces
+    echo 'ListenAddress 0.0.0.0' >> /etc/ssh/sshd_config && \
     ssh-keygen -A
 
-# Ensure a working shell and pseudo‑terminal directory
+# Ensure a valid shell and pseudo‑terminal directory
 RUN test -x /bin/bash || (apt-get update && apt-get install -y bash) && \
     sed -i 's|^root:.*|root:x:0:0:root:/root:/bin/bash|' /etc/passwd && \
     mkdir -p /dev/pts && chmod 755 /dev/pts
@@ -47,7 +50,7 @@ RUN test -x /bin/bash || (apt-get update && apt-get install -y bash) && \
 ENV NGROK_TOKEN=''
 ENV ROOT_PASSWORD='morning'
 
-# Entrypoint script
+# Entrypoint script – no extra options, just clean sshd
 RUN <<'EOF' cat > /usr/local/bin/entrypoint.sh
 #!/usr/bin/env bash
 set -euo pipefail
@@ -85,7 +88,8 @@ echo "===== ngrok tunnel ready ====="
 echo "ssh root@${TUNNEL_URL#tcp://}"
 echo "==============================="
 
-exec /usr/sbin/sshd -D -e -o UsePrivilegeSeparation=no
+# Start sshd with no extra options (configuration file already set)
+exec /usr/sbin/sshd -D -e
 EOF
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
