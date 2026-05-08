@@ -1,5 +1,5 @@
 # --------------------------------------------------------------
-#  Ubuntu 22.04 base – SSH over ngrok for Railway
+#  Ubuntu 22.04 – SSH over ngrok (no PAM, no session logout errors)
 # --------------------------------------------------------------
 FROM ubuntu:22.04
 
@@ -13,11 +13,7 @@ RUN apt-get update -y && \
         ca-certificates \
         tzdata \
         bash \
-        procps \
-        libpam-modules \
-        libpam-runtime \
-        libpam0g \
-        login && \
+        procps && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN locale-gen en_US.UTF-8 && \
@@ -25,46 +21,33 @@ RUN locale-gen en_US.UTF-8 && \
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
-# ngrok latest stable
+# Install ngrok
 ENV NGROK_URL=https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
 RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
     unzip -q /tmp/ngrok.zip -d /usr/local/bin && \
     chmod +x /usr/local/bin/ngrok && \
     rm -f /tmp/ngrok.zip
 
-# SSH config (no invalid options)
+# SSH configuration – use internal password auth, no PAM, no privilege separation
 RUN mkdir -p /var/run/sshd /var/log && \
-    sed -i 's/^#\?UsePAM .*/UsePAM yes/' /etc/ssh/sshd_config && \
+    sed -i 's/^#\?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config && \
     echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
+    echo 'ChallengeResponseAuthentication no' >> /etc/ssh/sshd_config && \
     echo 'PrintLastLog no' >> /etc/ssh/sshd_config && \
     echo 'PrintMotd no' >> /etc/ssh/sshd_config && \
     echo 'UsePrivilegeSeparation no' >> /etc/ssh/sshd_config && \
     ssh-keygen -A
 
-# Fix utmp/wtmp/lastlog
-RUN touch /var/log/wtmp /var/log/btmp /var/log/lastlog && \
-    chown root:utmp /var/log/wtmp /var/log/btmp && \
-    chmod 664 /var/log/wtmp /var/log/btmp && \
-    chmod 644 /var/log/lastlog
-
-# Ensure root shell and /dev/pts
+# Ensure a working shell and pseudo‑terminal directory
 RUN test -x /bin/bash || (apt-get update && apt-get install -y bash) && \
     sed -i 's|^root:.*|root:x:0:0:root:/root:/bin/bash|' /etc/passwd && \
     mkdir -p /dev/pts && chmod 755 /dev/pts
 
-# Minimal PAM config
-RUN cat > /etc/pam.d/sshd <<EOF
-auth       required     pam_unix.so     nullok
-account    required     pam_unix.so
-session    required     pam_unix.so
-session    required     pam_loginuid.so
-EOF
-
 ENV NGROK_TOKEN=''
 ENV ROOT_PASSWORD='morning'
 
-# Entrypoint – disable privilege separation to avoid audit errors
+# Entrypoint script
 RUN <<'EOF' cat > /usr/local/bin/entrypoint.sh
 #!/usr/bin/env bash
 set -euo pipefail
