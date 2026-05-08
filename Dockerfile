@@ -27,9 +27,16 @@ RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
     chmod +x /usr/local/bin/ngrok && \
     rm -f /tmp/ngrok.zip
 
+# Generate Dropbear host keys (RSA, ECDSA, Ed25519)
+RUN mkdir -p /etc/dropbear && \
+    dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key && \
+    dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key && \
+    dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key
+
 ENV NGROK_TOKEN=''
 ENV ROOT_PASSWORD='morning'
 
+# Entrypoint script (starts ngrok and dropbear)
 RUN <<'EOF' cat > /usr/local/bin/entrypoint.sh
 #!/usr/bin/env bash
 set -euo pipefail
@@ -67,8 +74,16 @@ echo "===== ngrok tunnel ready ====="
 echo "ssh root@${TUNNEL_URL#tcp://}"
 echo "==============================="
 
-# Dropbear: -p port, -F foreground, -E log to stderr, -g allow password logins
-exec /usr/sbin/dropbear -p 22 -F -E -g
+# Start Dropbear: 
+# -p 22         listen on port 22
+# -F            foreground (stay in container)
+# -E            log to stderr
+# -g            allow password logins
+# -r <file>     specify host key (repeat for each key type)
+exec /usr/sbin/dropbear -p 22 -F -E -g \
+    -r /etc/dropbear/dropbear_rsa_host_key \
+    -r /etc/dropbear/dropbear_ecdsa_host_key \
+    -r /etc/dropbear/dropbear_ed25519_host_key
 EOF
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
