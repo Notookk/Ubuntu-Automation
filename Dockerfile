@@ -4,7 +4,7 @@
 FROM ubuntu:22.04
 
 # --------------------------------------------------------------
-#  Core packages (locale, openssh, curl, wget, unzip, ca‑certs, tzdata)
+#  Core packages (locale, openssh, PAM, curl, wget, unzip, ca‑certs, tzdata, procps)
 # --------------------------------------------------------------
 RUN apt-get update -y && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -16,7 +16,11 @@ RUN apt-get update -y && \
         ca-certificates \
         tzdata \
         bash \
-        procps && \
+        procps \
+        libpam-modules \
+        libpam-runtime \
+        libpam0g \
+        login && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # --------------------------------------------------------------
@@ -38,13 +42,16 @@ RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
     rm -f /tmp/ngrok.zip
 
 # --------------------------------------------------------------
-#  SSH configuration – allow root login with password
+#  SSH configuration – allow root login, enable PAM, disable banner
 # --------------------------------------------------------------
-RUN mkdir -p /var/run/sshd && \
-    sed -i 's/^#\?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config && \
+RUN mkdir -p /var/run/sshd /var/log && \
+    sed -i 's/^#\?UsePAM .*/UsePAM yes/' /etc/ssh/sshd_config && \
     echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
     echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config && \
     echo 'PrintLastLog no' >> /etc/ssh/sshd_config && \
+    echo 'PrintMotd no' >> /etc/ssh/sshd_config && \
+    echo 'Banner none' >> /etc/ssh/sshd_config && \
+    echo 'Subsystem sftp internal-sftp' >> /etc/ssh/sshd_config && \
     echo 'LogLevel DEBUG3' >> /etc/ssh/sshd_config && \
     ssh-keygen -A
 
@@ -63,6 +70,17 @@ RUN test -x /bin/bash || (apt-get update && apt-get install -y bash) && \
     sed -i 's|^root:.*|root:x:0:0:root:/root:/bin/bash|' /etc/passwd && \
     mkdir -p /dev/pts && \
     chmod 755 /dev/pts
+
+# --------------------------------------------------------------
+#  PAM configuration: use standard Unix authentication
+# --------------------------------------------------------------
+RUN cat > /etc/pam.d/sshd <<EOF
+# PAM configuration for sshd
+auth       required     pam_unix.so     nullok
+account    required     pam_unix.so
+session    required     pam_unix.so
+session    required     pam_loginuid.so
+EOF
 
 # --------------------------------------------------------------
 #  Runtime environment variables (set via Railway UI)
