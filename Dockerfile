@@ -32,7 +32,7 @@ RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
     chmod +x /usr/local/bin/ngrok && \
     rm -f /tmp/ngrok.zip
 
-# SSH configuration – allow root, disable sandbox to avoid audit errors
+# SSH configuration (avoid deprecated/invalid options in config file)
 RUN mkdir -p /var/run/sshd /var/log && \
     sed -i 's/^#\?UsePAM .*/UsePAM yes/' /etc/ssh/sshd_config && \
     echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
@@ -40,11 +40,9 @@ RUN mkdir -p /var/run/sshd /var/log && \
     echo 'PrintLastLog no' >> /etc/ssh/sshd_config && \
     echo 'PrintMotd no' >> /etc/ssh/sshd_config && \
     echo 'LogLevel DEBUG3' >> /etc/ssh/sshd_config && \
-    echo 'Sandbox no' >> /etc/ssh/sshd_config && \
-    echo 'UsePrivilegeSeparation no' >> /etc/ssh/sshd_config && \
     ssh-keygen -A
 
-# Create log files for utmp/wtmp
+# Create utmp/wtmp/lastlog files
 RUN touch /var/log/wtmp /var/log/btmp /var/log/lastlog && \
     chown root:utmp /var/log/wtmp /var/log/btmp && \
     chmod 664 /var/log/wtmp /var/log/btmp && \
@@ -66,7 +64,7 @@ EOF
 ENV NGROK_TOKEN=''
 ENV ROOT_PASSWORD='morning'
 
-# Entrypoint script
+# Entrypoint script – pass sandbox options directly to sshd command
 RUN <<'EOF' cat > /usr/local/bin/entrypoint.sh
 #!/usr/bin/env bash
 set -euo pipefail
@@ -104,7 +102,8 @@ echo "===== ngrok tunnel ready ====="
 echo "ssh root@${TUNNEL_URL#tcp://}"
 echo "==============================="
 
-exec /usr/sbin/sshd -D -e
+# Start SSHd with command-line overrides to avoid audit failures
+exec /usr/sbin/sshd -D -e -o Sandbox=no -o UsePrivilegeSeparation=no
 EOF
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
