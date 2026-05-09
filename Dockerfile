@@ -1,90 +1,131 @@
 FROM ubuntu:22.04
 
-RUN apt-get update -y && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y \
-        locales \
-        dropbear \
-        wget \
-        curl \
-        unzip \
-        ca-certificates \
-        tzdata \
-        bash \
-        procps && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+ENV DEBIAN_FRONTEND=noninteractive
 
+RUN apt-get update -y && \
+    apt-get install -y \
+    locales \
+    dropbear \
+    wget \
+    curl \
+    unzip \
+    ca-certificates \
+    tzdata \
+    bash \
+    procps && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Locale
 RUN locale-gen en_US.UTF-8 && \
     update-locale LANG=en_US.UTF-8
+
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
+# Install ngrok
 ENV NGROK_URL=https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
+
 RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
     unzip -q /tmp/ngrok.zip -d /usr/local/bin && \
     chmod +x /usr/local/bin/ngrok && \
     rm -f /tmp/ngrok.zip
 
-# Generate all host key types (including DSS to silence warning)
+# Generate Dropbear host keys
 RUN mkdir -p /etc/dropbear && \
     dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key && \
     dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key && \
-    dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key && \
-    dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key 2>/dev/null || true
+    dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key
 
-ENV NGROK_TOKEN=''
-ENV ROOT_PASSWORD='morning'
+# Default password
+ENV ROOT_PASSWORD=morning
 
-RUN <<'EOF' cat > /usr/local/bin/entrypoint.sh
+# Set password during build too
+RUN echo "root:${ROOT_PASSWORD}" | chpasswd
+
+# Ngrok token (SET THIS IN RAILWAY VARIABLES)
+ENV NGROK_TOKEN=""
+
+# Entrypoint
+RUN cat > /usr/local/bin/entrypoint.sh << 'EOF'
 #!/usr/bin/env bash
-set -euo pipefail
 
-if [[ -n "${ROOT_PASSWORD:-}" ]]; then
-    echo "root:${ROOT_PASSWORD}" | chpasswd
-    if [[ "${ROOT_PASSWORD}" == "morning" ]]; then
-        echo "⚠️  Using default root password – please change it!"
-    fi
+set -e
+
+echo "================================="
+echo "Starting SSH VPS..."
+echo "================================="
+
+# Update password at runtime
+if [ -n "$ROOT_PASSWORD" ]; then
+    echo "root:$ROOT_PASSWORD" | chpasswd
 fi
 
-if [[ -z "${NGROK_TOKEN:-}" ]]; then
-    echo "❌ NGROK_TOKEN env var not set – aborting."
+# Check ngrok token
+if [ -z "$NGROK_TOKEN" ]; then
+    echo "NGROK_TOKEN is missing!"
     exit 1
 fi
 
-ngrok config add-authtoken "${NGROK_TOKEN}" >/dev/null
-ngrok tcp 22 --log=stdout &
-NGROK_PID=$!
+# Configure ngrok
+ngrok config add-authtoken "$NGROK_TOKEN"
 
-for i in {1..10}; do
-    if curl -s http://localhost:4040/api/tunnels >/dev/null 2>&1; then
-        break
-    fi
-    sleep 1
-done
-
-TUNNEL_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -1)
-if [[ -z "$TUNNEL_URL" ]]; then
-    echo "❌ Failed to obtain ngrok tunnel URL"
-    exit 1
-fi
-
-echo "===== ngrok tunnel ready ====="
-echo "ssh root@${TUNNEL_URL#tcp://}"
-echo "==============================="
-
-# Start Dropbear:
-# -p 22      port
-# -F         foreground
-# -E         log to stderr
-# -s         disable public key auth (force password)
-# -r keys    specify host keys
-exec /usr/sbin/dropbear -p 22 -F -E -s \
+# Start Dropbear SSH server
+/usr/sbin/dropbear \
+    -p 22 \
+    -R \
+    -F \
+    -E \
     -r /etc/dropbear/dropbear_rsa_host_key \
     -r /etc/dropbear/dropbear_ecdsa_host_key \
-    -r /etc/dropbear/dropbear_ed25519_host_key \
-    -r /etc/dropbear/dropbear_dss_host_key
+    -r /etc/dropbear/dropbear_ed25519_host_key &
+
+sleep 3
+
+# Start ngrok tunnel
+ngrok tcp 22 --log=stdout > /tmp/ngrok.log 2>&1 &
+
+echo "Waiting for ngrok tunnel..."
+
+for i in $(seq 1 30); do
+    sleep 2
+
+    TUNNEL=$(curl -s http://127.0.0.1:4040/api/tunnels | grep -o 'tcp://[^"]*' | head -n 1)
+
+    if [ ! -z "$TUNNEL" ]; then
+        break
+    fi
+done
+
+if [ -z "$TUNNEL" ]; then
+    echo "Failed to get ngrok tunnel!"
+    cat /tmp/ngrok.log
+    exit 1
+fi
+
+HOST=$(echo $TUNNEL | sed 's/tcp:\/\///' | cut -d: -f1)
+PORT=$(echo $TUNNEL | sed 's/tcp:\/\///' | cut -d: -f2)
+
+echo ""
+echo "================================="
+echo "SSH VPS READY"
+echo "================================="
+echo ""
+echo "SSH Command:"
+echo "ssh root@$HOST -p $PORT"
+echo ""
+echo "Password:"
+echo "$ROOT_PASSWORD"
+echo ""
+echo "================================="
+
+# Keep container alive
+tail -f /dev/null
 EOF
 
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-EXPOSE 22 4040
+EXPOSE 22
+EXPOSE 4040
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
