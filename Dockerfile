@@ -2,53 +2,36 @@ FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install packages
 RUN apt-get update -y && \
     apt-get install -y \
-    locales \
     dropbear \
-    wget \
     curl \
+    wget \
     unzip \
-    ca-certificates \
-    tzdata \
     bash \
-    procps && \
+    procps \
+    ca-certificates \
+    tzdata && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# Locale
-RUN locale-gen en_US.UTF-8 && \
-    update-locale LANG=en_US.UTF-8
-
-ENV LANG=en_US.UTF-8
-ENV LC_ALL=en_US.UTF-8
-
 # Install ngrok
-ENV NGROK_URL=https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip
-
-RUN wget -qO /tmp/ngrok.zip "${NGROK_URL}" && \
-    unzip -q /tmp/ngrok.zip -d /usr/local/bin && \
+RUN wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.zip -O /tmp/ngrok.zip && \
+    unzip /tmp/ngrok.zip -d /usr/local/bin && \
     chmod +x /usr/local/bin/ngrok && \
     rm -f /tmp/ngrok.zip
 
-# Generate Dropbear host keys
-RUN mkdir -p /etc/dropbear && \
-    dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key && \
-    dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key && \
-    dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key
-
-# Default password
+# Environment variables
 ENV ROOT_PASSWORD=morning
-
-# Set password during build too
-RUN echo "root:${ROOT_PASSWORD}" | chpasswd
-
-# Ngrok token (SET THIS IN RAILWAY VARIABLES)
 ENV NGROK_TOKEN=""
 
-# Entrypoint
-RUN cat > /usr/local/bin/entrypoint.sh << 'EOF'
-#!/usr/bin/env bash
+# Set root password
+RUN echo "root:${ROOT_PASSWORD}" | chpasswd
+
+# Create startup script
+RUN cat > /start.sh << 'EOF'
+#!/bin/bash
 
 set -e
 
@@ -57,36 +40,34 @@ echo "Starting SSH VPS..."
 echo "================================="
 
 # Update password at runtime
-if [ -n "$ROOT_PASSWORD" ]; then
+if [ ! -z "$ROOT_PASSWORD" ]; then
     echo "root:$ROOT_PASSWORD" | chpasswd
 fi
 
 # Check ngrok token
 if [ -z "$NGROK_TOKEN" ]; then
-    echo "NGROK_TOKEN is missing!"
+    echo ""
+    echo "ERROR: NGROK_TOKEN not set!"
+    echo ""
     exit 1
 fi
 
 # Configure ngrok
 ngrok config add-authtoken "$NGROK_TOKEN"
 
-# Start Dropbear SSH server
-/usr/sbin/dropbear \
-    -p 22 \
-    -R \
-    -F \
-    -E \
-    -r /etc/dropbear/dropbear_rsa_host_key \
-    -r /etc/dropbear/dropbear_ecdsa_host_key \
-    -r /etc/dropbear/dropbear_ed25519_host_key &
+# Start SSH server
+/usr/sbin/dropbear -R -F -E -p 22 &
 
-sleep 3
+sleep 5
 
-# Start ngrok tunnel
+# Start ngrok TCP tunnel
 ngrok tcp 22 --log=stdout > /tmp/ngrok.log 2>&1 &
 
+echo ""
 echo "Waiting for ngrok tunnel..."
+echo ""
 
+# Wait for tunnel
 for i in $(seq 1 30); do
     sleep 2
 
@@ -98,7 +79,8 @@ for i in $(seq 1 30); do
 done
 
 if [ -z "$TUNNEL" ]; then
-    echo "Failed to get ngrok tunnel!"
+    echo "Failed to create ngrok tunnel!"
+    echo ""
     cat /tmp/ngrok.log
     exit 1
 fi
@@ -106,9 +88,8 @@ fi
 HOST=$(echo $TUNNEL | sed 's/tcp:\/\///' | cut -d: -f1)
 PORT=$(echo $TUNNEL | sed 's/tcp:\/\///' | cut -d: -f2)
 
-echo ""
 echo "================================="
-echo "SSH VPS READY"
+echo "VPS READY"
 echo "================================="
 echo ""
 echo "SSH Command:"
@@ -119,13 +100,13 @@ echo "$ROOT_PASSWORD"
 echo ""
 echo "================================="
 
-# Keep container alive
+# Keep alive
 tail -f /dev/null
 EOF
 
-RUN chmod +x /usr/local/bin/entrypoint.sh
+RUN chmod +x /start.sh
 
 EXPOSE 22
 EXPOSE 4040
 
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["/start.sh"]
